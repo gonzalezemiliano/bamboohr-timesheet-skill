@@ -4,6 +4,24 @@ Conversational BambooHR timesheet builder. Describe your day in natural language
 
 Works with any AI agent (Claude Code, Gemini, Codex, OpenCode) or standalone via shell scripts.
 
+## Installation
+
+Clone into your AI agent's skills folder, naming it `timesheet`:
+
+```bash
+# Claude Code
+cd /path/to/your/project/.claude/skills
+git clone https://github.com/gonzalezemiliano/bamboohr-timesheet-skill.git timesheet
+
+# Gemini CLI
+cd /path/to/your/project/.gemini/skills
+git clone https://github.com/gonzalezemiliano/bamboohr-timesheet-skill.git timesheet
+
+# Global (any agent)
+cd ~/.claude/skills   # or ~/.gemini/skills
+git clone https://github.com/gonzalezemiliano/bamboohr-timesheet-skill.git timesheet
+```
+
 ## Quick Start
 
 ```bash
@@ -14,7 +32,7 @@ export BAMBOOHR_EMPLOYEE_ID="123"
 source ~/.zshrc
 
 # 2. Run first-time setup (auto-discovers projects and tasks)
-.claude/skills/timesheet/scripts/init.sh
+./scripts/init.sh
 
 # 3. Use the skill (in Claude Code)
 /timesheet                    # Start conversational flow
