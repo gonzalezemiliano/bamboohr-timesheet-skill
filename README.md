@@ -38,6 +38,7 @@ source ~/.zshrc
 /timesheet                    # Start conversational flow
 /timesheet show               # Show current week's entries
 /timesheet 4h feature dev     # Pre-populate with description
+/timesheet csv ~/path/to/Weekly\ time\ sheet\ -\ Today.csv  # Import from CSV
 ```
 
 ## Setup
@@ -455,3 +456,70 @@ This is implemented as a **skill** (`.claude/skills/`) rather than a **command**
 - **Standalone scripts**: The bash scripts work without any AI agent at all
 - **No framework dependencies**: Pure bash + curl + jq — runs anywhere
 - **Bypasses broken MCP**: The BambooHR MCP server's time tracking tools have incorrect URL patterns; this skill calls the API directly via curl
+
+## CSV Import from Google Sheets (Optional)
+
+The `/timesheet csv` command imports timesheet entries from a CSV file exported from Google Sheets. It is useful when your team tracks time in a shared spreadsheet with multiple people per day — the agent automatically filters only your rows and ignores the rest.
+
+### Step 1: Expected CSV Format
+
+The skill expects the following column layout (0-based index):
+
+| Index | Header in sheet | Content |
+|-------|-----------------|---------|
+| 3 | Total | Duration in `H:MM:SS` format (e.g. `1:30:00`) |
+| 5 | Description | Work description or note |
+| 6 | Pjt | Project name (must match a project in `config.json`) |
+| 7 | Type | Task name (must match a task under that project) |
+| 13 | Person | Short name/alias used to identify the row owner |
+
+**Notes:**
+- Row 0 is treated as a header and ignored.
+- Rows where Total is `0:00:00` are skipped automatically.
+- Rows where Pjt or Type are empty are skipped automatically.
+
+### Step 2: Configure Your Person Identifier
+
+The skill filters rows by the alias in column 13. Open your `SKILL.md` and find the line:
+
+```
+Filter by person: Only process rows where column 13 = "Fer" (case-insensitive, trim whitespace)
+```
+
+Replace `"Fer"` with the alias that appears in column 13 of your own CSV (e.g. `"Alice"`, `"jdoe"`, `"MJ"`, etc.). The match is case-insensitive and ignores leading/trailing whitespace.
+
+### Step 3: Export the CSV from Google Sheets
+
+Open your weekly time sheet in Google Sheets, navigate to the active day's tab, then:
+
+**File > Download > Comma-separated values (.csv)**
+
+### Step 4: Use the Command
+
+```
+/timesheet csv ~/Downloads/Weekly\ time\ sheet\ -\ Today.csv
+```
+
+The agent reads the file, filters your rows, maps projects and tasks via `config.json`, and presents a table for review before submitting:
+
+```
+Reading CSV: Weekly time sheet - Today.csv
+Found 2 entries for alice (2026-02-13):
+
+| # | Date       | Project          | Task                        | Hours | Note                    |
+|---|------------|------------------|-----------------------------|-------|-------------------------|
+| 1 | 2026-02-13 | Project Alpha    | Feature Development         | 2.0   | JIRA-1001 auth module   |
+| 2 | 2026-02-13 | Project Alpha    | Project Meetings - Internal | 0.5   | Daily standup           |
+
+Total: 2.5 hours
+
+Want to change anything or shall we submit?
+```
+
+### Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| No entries imported | Check that your alias in column 13 matches what you set in `SKILL.md` |
+| Wrong hours | Expected format is `H:MM:SS`. Verify your Google Sheet exports in that format |
+| Project/task not found | The agent will ask you to pick from `config.json`; mapping happens at import time |
