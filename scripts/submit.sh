@@ -91,13 +91,15 @@ if [[ "$MODE" == "show" ]]; then
   echo "Fetching timesheet entries: ${START_DATE} to ${END_DATE}"
   echo ""
 
-  response=$(curl -s -w "\n%{http_code}" \
+  response=$(curl -s --connect-timeout 10 --max-time 30 \
+    -w "\nHTTP_CODE:%{http_code}" \
     -u "$AUTH" \
     -H "Accept: application/json" \
     "${BASE_URL}/time_tracking/timesheet_entries?employeeIds=${BAMBOOHR_EMPLOYEE_ID}&start=${START_DATE}&end=${END_DATE}")
 
-  http_code=$(echo "$response" | tail -1)
-  body=$(echo "$response" | sed '$d')
+  http_code="${response##*HTTP_CODE:}"
+  body="${response%HTTP_CODE:*}"
+  body="${body%$'\n'}"
 
   if [[ "$http_code" != "200" ]]; then
     echo "Error: BambooHR API returned HTTP ${http_code}" >&2
@@ -139,6 +141,9 @@ if [[ ! -f "$INPUT_FILE" ]]; then
   exit 1
 fi
 
+# Clean up temp file on exit (safety net — AI should also clean up)
+trap 'rm -f "$INPUT_FILE"' EXIT
+
 # Validate JSON structure
 if ! jq empty "$INPUT_FILE" 2>/dev/null; then
   echo "Error: Invalid JSON in $INPUT_FILE" >&2
@@ -171,7 +176,8 @@ fi
 # Submit to BambooHR
 echo "Submitting to BambooHR..."
 
-response=$(curl -s -w "\n%{http_code}" \
+response=$(curl -s --connect-timeout 10 --max-time 30 \
+  -w "\nHTTP_CODE:%{http_code}" \
   -X POST \
   -u "$AUTH" \
   -H "Content-Type: application/json" \
@@ -179,8 +185,9 @@ response=$(curl -s -w "\n%{http_code}" \
   -d @"$INPUT_FILE" \
   "${BASE_URL}/time_tracking/hour_entries/store")
 
-http_code=$(echo "$response" | tail -1)
-body=$(echo "$response" | sed '$d')
+http_code="${response##*HTTP_CODE:}"
+body="${response%HTTP_CODE:*}"
+body="${body%$'\n'}"
 
 if [[ "$http_code" == "201" || "$http_code" == "200" ]]; then
   echo "Success: ${entry_count} entries (${total_hours} hours) submitted to BambooHR."
