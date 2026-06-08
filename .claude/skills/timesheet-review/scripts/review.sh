@@ -119,17 +119,53 @@ if [[ "$ts_code" != "200" ]]; then
   exit 1
 fi
 
+# --- Fetch approved time off for each direct report ---
+echo "Fetching time off data..." >&2
+timeoff_json="{}"
+while IFS= read -r emp_id; do
+  to_resp=$(curl -s -w "\n%{http_code}" -u "$AUTH" -H "Accept: application/json" \
+    "${BASE_URL}/time_off/requests?employeeId=${emp_id}&start=${WEEK_START}&end=${WEEK_END}&status=approved")
+  to_code=$(echo "$to_resp" | tail -1)
+  to_body=$(echo "$to_resp" | sed '$d')
+
+  if [[ "$to_code" == "200" ]]; then
+    emp_timeoff=$(echo "$to_body" | jq --arg start "$WEEK_START" --arg end "$WEEK_END" '
+      if type == "array" then . else [] end |
+      [
+        .[] |
+        select(
+          (.status | if type == "object" then .status else . end) == "approved"
+        ) |
+        (.amount.unit // "days") as $unit |
+        (if $unit == "hours" then 1 else 8 end) as $mult |
+        [
+          .dates | to_entries[] |
+          select(.key >= $start and .key <= $end) |
+          (.value | tonumber) * $mult
+        ] | add // 0
+      ] | add // 0
+    ')
+    timeoff_json=$(echo "$timeoff_json" | jq \
+      --arg id "$emp_id" \
+      --argjson hours "${emp_timeoff:-0}" \
+      '. + {($id): $hours}')
+  fi
+done < <(echo "$direct_reports" | jq -r '.[].id')
+
 # --- Validate entries and build report data ---
 REPORT=$(echo "$ts_body" | jq \
   --argjson reports "$direct_reports" \
   --argjson config "$CONFIG" \
   --argjson target "$HOURS_TARGET" \
+  --argjson timeoff "$timeoff_json" \
   '
   . as $entries |
   [$reports[] as $emp |
     [$entries[] | select(.employeeId == ($emp.id | tonumber))] as $emp_entries |
     ($emp_entries | map(.hours) | add // 0) as $total |
-    (($total * 100 | round) == ($target * 100 | round)) as $hours_ok |
+    ($timeoff[($emp.id | tostring)] // 0) as $timeoff_h |
+    ($target - $timeoff_h) as $effective_target |
+    (($total * 100 | round) == ($effective_target * 100 | round)) as $hours_ok |
     [$emp_entries[] |
       (.projectInfo.project.name // "") as $proj |
       (.projectInfo.task.name // "") as $task |
@@ -151,6 +187,8 @@ REPORT=$(echo "$ts_body" | jq \
       name: $emp.name,
       jobTitle: $emp.jobTitle,
       total: $total,
+      timeoff_hours: $timeoff_h,
+      effective_target: $effective_target,
       hours_ok: $hours_ok,
       target: $target,
       entries: $validated,
@@ -165,16 +203,18 @@ echo "# Weekly Timesheet Review — ${WEEK_START} to ${WEEK_END}"
 echo ""
 echo "## Summary"
 echo ""
-echo "| Employee | Hours | Horas | IDs | Estado |"
-echo "|----------|-------|-------|-----|--------|"
-echo "$REPORT" | jq -r --argjson target "$HOURS_TARGET" '.[] |
-  "| \(.name) | \(.total)/\($target) | \(if .hours_ok then "✅" else "❌" end) | \(if (.id_errors | length) == 0 then "✅" else "❌" end) | \(if .hours_ok and ((.id_errors | length) == 0) then "✅ OK" else "❌ Issues" end) |"'
+echo "| Employee | Work | Time Off | Target | Horas | IDs | Estado |"
+echo "|----------|------|----------|--------|-------|-----|--------|"
+echo "$REPORT" | jq -r '.[] |
+  "| \(.name) | \(.total)h | \(if .timeoff_hours > 0 then "\(.timeoff_hours)h" else "—" end) | \(.effective_target)h | \(if .hours_ok then "✅" else "❌" end) | \(if (.id_errors | length) == 0 then "✅" else "❌" end) | \(if .hours_ok and ((.id_errors | length) == 0) then "✅ OK" else "❌ Issues" end) |"'
 echo ""
 
 echo "$REPORT" | jq -c '.[]' | while IFS= read -r emp; do
   name=$(echo "$emp" | jq -r '.name')
   total=$(echo "$emp" | jq -r '.total')
   target=$(echo "$emp" | jq -r '.target')
+  effective_target=$(echo "$emp" | jq -r '.effective_target')
+  timeoff_h=$(echo "$emp" | jq -r '.timeoff_hours')
   hours_ok=$(echo "$emp" | jq -r '.hours_ok')
   id_count=$(echo "$emp" | jq '.id_errors | length')
 
@@ -182,23 +222,33 @@ echo "$REPORT" | jq -c '.[]' | while IFS= read -r emp; do
   all_ok="false"
   [[ "$hours_ok" == "true" && "$id_count" == "0" ]] && all_ok="true"
 
+  timeoff_label=""
+  if [[ "$timeoff_h" != "0" ]]; then
+    timeoff_label=" (${timeoff_h}h time off)"
+  fi
+
   echo "---"
   echo ""
-  echo "## ${name} — ${total}h ${hours_icon}"
+  echo "## ${name} — ${total}h trabajadas${timeoff_label} ${hours_icon}"
   echo ""
   echo "| Date | Project | Task | Description | Hours | ✓ |"
   echo "|------|---------|------|-------------|-------|---|"
+
+  if [[ "$timeoff_h" != "0" ]]; then
+    echo "| — | — | Time Off (approved) | — | ${timeoff_h} | ✅ |"
+  fi
+
   echo "$emp" | jq -r '.entries[] |
     "| \(.date) | \(.project | .[0:20]) | \(.task | .[0:26]) | \(.note | split("\n") | join(" ") | .[0:38]) | \(.hours) | \(if .ok then "✅" else "❌" end) |"'
   echo ""
 
   if [[ "$hours_ok" == "false" ]]; then
-    if [[ $(echo "$emp" | jq -r "if .total < ${target} then \"yes\" else \"no\" end") == "yes" ]]; then
-      missing=$(echo "$emp" | jq -r "${target} - .total")
-      echo "  ❌ Horas insuficientes: ${total}/${target} (faltan ${missing}h)"
+    if [[ $(echo "$emp" | jq -r "if .total < ${effective_target} then \"yes\" else \"no\" end") == "yes" ]]; then
+      missing=$(echo "$emp" | jq -r "${effective_target} - .total")
+      echo "  ❌ Horas insuficientes: ${total}h trabajadas + ${timeoff_h}h time off = $(echo "$emp" | jq -r '.total + .timeoff_hours')/${target} (faltan ${missing}h)"
     else
-      excess=$(echo "$emp" | jq -r ".total - ${target}")
-      echo "  ❌ Horas excedidas: ${total}/${target} (exceso: ${excess}h)"
+      excess=$(echo "$emp" | jq -r ".total - ${effective_target}")
+      echo "  ❌ Horas excedidas: ${total}/${effective_target} (exceso: ${excess}h)"
     fi
   fi
 
