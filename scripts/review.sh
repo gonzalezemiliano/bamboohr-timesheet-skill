@@ -120,38 +120,44 @@ if [[ "$ts_code" != "200" ]]; then
   exit 1
 fi
 
-# --- Fetch approved time off for each direct report ---
+# --- Fetch approved time off for all direct reports (single request) ---
 echo "Fetching time off data..." >&2
+# Day-based time off converts to hours assuming a 5-day work week
+DAILY_HOURS=$(jq -n --argjson t "$HOURS_TARGET" '$t / 5')
 timeoff_json="{}"
-while IFS= read -r emp_id; do
-  to_resp=$(curl -s -w "\n%{http_code}" -u "$AUTH" -H "Accept: application/json" \
-    "${BASE_URL}/time_off/requests?employeeId=${emp_id}&start=${WEEK_START}&end=${WEEK_END}&status=approved")
-  to_code=$(echo "$to_resp" | tail -1)
-  to_body=$(echo "$to_resp" | sed '$d')
+to_resp=$(curl -s -w "\n%{http_code}" -u "$AUTH" -H "Accept: application/json" \
+  "${BASE_URL}/time_off/requests?start=${WEEK_START}&end=${WEEK_END}&status=approved")
+to_code=$(echo "$to_resp" | tail -1)
+to_body=$(echo "$to_resp" | sed '$d')
 
-  if [[ "$to_code" == "200" ]]; then
-    emp_timeoff=$(echo "$to_body" | jq --arg start "$WEEK_START" --arg end "$WEEK_END" '
-      if type == "array" then . else [] end |
-      [
-        .[] |
-        select(
-          (.status | if type == "object" then .status else . end) == "approved"
-        ) |
-        (.amount.unit // "days") as $unit |
-        (if $unit == "hours" then 1 else 8 end) as $mult |
-        [
+if [[ "$to_code" == "200" ]]; then
+  timeoff_json=$(echo "$to_body" | jq \
+    --arg start "$WEEK_START" --arg end "$WEEK_END" \
+    --argjson daily "$DAILY_HOURS" \
+    --argjson reports "$direct_reports" '
+    [$reports[].id | tostring] as $ids |
+    (if type == "array" then . else [] end) |
+    map(
+      select((.employeeId | tostring) as $eid | $ids | index($eid)) |
+      select(
+        (.status | if type == "object" then .status else . end) == "approved"
+      ) |
+      (.amount.unit // "days") as $unit |
+      (if $unit == "hours" then 1 else $daily end) as $mult |
+      {
+        id: (.employeeId | tostring),
+        hours: ([
           .dates | to_entries[] |
           select(.key >= $start and .key <= $end) |
           (.value | tonumber) * $mult
-        ] | add // 0
-      ] | add // 0
-    ')
-    timeoff_json=$(echo "$timeoff_json" | jq \
-      --arg id "$emp_id" \
-      --argjson hours "${emp_timeoff:-0}" \
-      '. + {($id): $hours}')
-  fi
-done < <(echo "$direct_reports" | jq -r '.[].id')
+        ] | add // 0)
+      }
+    ) |
+    group_by(.id) | map({key: .[0].id, value: (map(.hours) | add)}) | from_entries
+  ')
+else
+  echo "Warning: Time off API returned HTTP ${to_code} — assuming no time off." >&2
+fi
 
 # --- Validate entries and build report data ---
 REPORT=$(echo "$ts_body" | jq \
