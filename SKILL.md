@@ -5,7 +5,7 @@ description: |
   curate entries with projects/tasks/hours, then submit after approval.
   Triggers on: "timesheet", "log hours", "log time", "track time",
   "bamboohr", "submit timesheet", "what did I work on".
-argument-hint: [add|show|calendar] [natural language description]
+argument-hint: "[add|show|calendar] [natural language description] — use init --refresh to update projects"
 allowed-tools: Read, Bash, AskUserQuestion, ToolSearch
 ---
 
@@ -30,7 +30,7 @@ If it does NOT exist:
 
 If any env var is missing, tell the user which ones they need to set and stop.
 
-After setup (or if `config.json` already exists), read it to load the available projects and tasks.
+After setup (or if `config.json` already exists), read it to load the available projects and tasks. Check the `generatedAt` field — if it is older than 30 days, suggest running `init.sh --refresh` to pick up any new projects or tasks.
 
 To refresh the project/task list: `bash .claude/skills/timesheet/scripts/init.sh --refresh`
 
@@ -75,6 +75,8 @@ For each candidate entry, match it to a project and task from `config.json`. Use
 
 If there's ambiguity, ask the user using AskUserQuestion.
 
+When the same task name exists under multiple projects (e.g. "Project Meetings - Internal"), use the project that matches the work context. For client work, use the client's project. For internal Modelit activities, use the relevant Modelit project.
+
 Use today's date unless the user specifies otherwise.
 
 ### Step 3: Build the Entries Table
@@ -105,6 +107,8 @@ The user can refine entries conversationally:
 
 After each change, redisplay the full table with updated totals.
 
+If the user says "cancel", "start over", or "clear all", discard all entries and return to Step 1.
+
 ### Step 5: Submit
 
 **Only submit after explicit user approval.** Trigger words: "submit", "looks good", "send it", "yes", "go ahead", "ship it", "lgtm".
@@ -124,7 +128,7 @@ To submit:
 3. Write the JSON to a temp file
 4. Run: `bash .claude/skills/timesheet/scripts/submit.sh /tmp/timesheet-YYYY-MM-DD.json`
 5. Report the result (success count, total hours)
-6. Clean up the temp file
+6. Clean up the temp file — the AI is responsible for cleanup after submission (successful or failed). The script also cleans up via trap as a safety net.
 
 ## Calendar Import
 

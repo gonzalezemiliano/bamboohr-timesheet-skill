@@ -54,13 +54,15 @@ AUTH="${BAMBOOHR_API_KEY}:x"
 echo "Fetching projects and tasks for employee ${BAMBOOHR_EMPLOYEE_ID}..."
 
 # --- Fetch projects/tasks ---
-response=$(curl -s -w "\n%{http_code}" \
+response=$(curl -s --connect-timeout 10 --max-time 30 \
+  -w "\nHTTP_CODE:%{http_code}" \
   -u "$AUTH" \
   -H "Accept: application/json" \
   "${BASE_URL}/time_tracking/employees/${BAMBOOHR_EMPLOYEE_ID}/projects")
 
-http_code=$(echo "$response" | tail -1)
-body=$(echo "$response" | sed '$d')
+http_code="${response##*HTTP_CODE:}"
+body="${response%HTTP_CODE:*}"
+body="${body%$'\n'}"
 
 if [[ "$http_code" != "200" ]]; then
   echo "Error: BambooHR API returned HTTP ${http_code}" >&2
@@ -81,10 +83,11 @@ config=$(echo "$body" | jq --arg eid "$BAMBOOHR_EMPLOYEE_ID" --arg ts "$(date -u
       name: .name
     }]
   }],
-  generatedAt: $ts
+  generatedAt: $ts,
+  version: "1.0"
 }')
 
-echo "$config" > "$CONFIG_FILE"
+echo "$config" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
 
 # --- Summary ---
 project_count=$(echo "$config" | jq '.projects | length')
