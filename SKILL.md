@@ -48,6 +48,8 @@ To refresh the project/task list: `bash .claude/skills/timesheet/scripts/init.sh
 | `add <text>` | Pre-populate Step 1 with the provided text |
 | `review` or `--review` | Jump to **Team Review** — validate direct reports' timesheets for the previous week |
 | `review --week 2026-05-25` | Team review for a specific week (Monday date) |
+| `review --start 2026-06-01 --end 2026-06-10` | Team review for an arbitrary date range |
+| `review --all` | Team review of every employee in the company (senior managers without direct reports) |
 | No argument | Start the conversational flow from Step 1 |
 | Natural language (e.g., "4h feature dev") | Treat as `add <text>` |
 
@@ -216,10 +218,14 @@ For a specific date range:
 
 ## Team Review (Managers)
 
-When the user says "review", "--review", "review del equipo", "check team hours", or similar, run the weekly team timesheet review. It fetches the manager's direct reports from the BambooHR directory and validates that each person:
+When the user says "review", "--review", "review del equipo", "check team hours", or similar, run the team timesheet review. It fetches the manager's direct reports from the BambooHR directory and validates that each person:
 
-1. Logged the required hours for the week (approved time off is subtracted from the target)
+1. Logged the required hours for the period (approved time off is subtracted from the target)
 2. Included a ticket ID (e.g., `TD-11615`) in the description of technical entries
+
+The review covers the previous week by default, a specific week (`--week`), or an arbitrary date range (`--start`/`--end`). The hours target scales to the business days (Mon–Fri) in the range: `business days × weeklyHoursTarget / 5`.
+
+**Scope:** by default only the manager's direct reports are reviewed. If the user is a senior manager with no direct reports (they manage managers), or explicitly asks to review the whole company, add `--all` to review every employee in the directory. If the script reports "No direct reports found", offer the user the `--all` option before rerunning.
 
 Validation rules live in `review-config.json` — separate from `config.json`, which init.sh auto-generates and overwrites on `--refresh`.
 
@@ -262,14 +268,25 @@ For a **specific week** (provide the Monday date):
 bash .claude/skills/timesheet/scripts/review.sh --week 2026-05-25
 ```
 
-The script prints a markdown report to stdout: a summary table (worked hours, time off, effective target, status per employee) followed by a per-employee entry detail. Display the output directly to the user — no additional formatting needed.
+For an **arbitrary date range**:
+```bash
+bash .claude/skills/timesheet/scripts/review.sh --start 2026-06-01 --end 2026-06-10
+```
+
+For **all employees in the company** (combinable with any date option):
+```bash
+bash .claude/skills/timesheet/scripts/review.sh --all --start 2026-06-01 --end 2026-06-10
+```
+
+The script prints a markdown report to stdout: the hours target for the range, a summary table (worked hours, time off, effective target, status per employee), and a per-employee entry detail. Display the output directly to the user — no additional formatting needed.
 
 ### Review Errors
 
 | Error | Action |
 |-------|--------|
 | `review-config.json` missing | Run the Review Setup flow |
-| No direct reports found | Inform the user — they may not be set as supervisor in BambooHR |
+| No direct reports found | Offer to rerun with `--all` (reviews every employee) — confirm with the user first |
+| Invalid date range (`--start` after `--end`, bad format, no business days) | Show the script's error and ask for corrected dates |
 | API error | Show HTTP status and response body |
 
 ## Error Handling

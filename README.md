@@ -319,10 +319,12 @@ Agent: (submits a single 1.0h entry)
 
 ## Team Review (Managers)
 
-If you have direct reports in BambooHR, `/timesheet review` validates their previous week:
+If you have direct reports in BambooHR, `/timesheet review` validates their timesheets:
 
-- Each person logged the required weekly hours (approved time off is subtracted from the target)
+- Each person logged the required hours for the period (approved time off is subtracted from the target)
 - Technical entries include a ticket ID (e.g., `TD-11615`) in the description
+
+The hours target scales to the business days in the reviewed range (`business days × weeklyHoursTarget / 5`), so a full week checks against the weekly target and a 3-day range against 3 days' worth.
 
 Validation rules are configured per project in `review-config.json` (ticket ID pattern, task types that require one, weekly hours target). The first run walks you through creating it.
 
@@ -332,6 +334,12 @@ bash scripts/review.sh
 
 # Review a specific week (provide the Monday date)
 bash scripts/review.sh --week 2026-05-25
+
+# Review an arbitrary date range
+bash scripts/review.sh --start 2026-06-01 --end 2026-06-10
+
+# Senior managers without direct reports: review every employee in the company
+bash scripts/review.sh --all
 ```
 
 ## API Reference
