@@ -1,11 +1,10 @@
 # Project Context
 
-## Available Skills
-
-This project includes custom skills in `.claude/skills/`. Use them when relevant.
+This repository is the `timesheet` skill itself: SKILL.md at the root holds the
+agent instructions, and `scripts/` holds the BambooHR API scripts. Team review
+for managers is part of the same skill (`/timesheet review`, scripts/review.sh).
 
 ## Environment
 
-BambooHR integration is available via the `timesheet` skill.
-Ensure BAMBOOHR_API_KEY, BAMBOOHR_COMPANY_DOMAIN, and BAMBOOHR_EMPLOYEE_ID
-are set in your shell environment before using it.
+BambooHR integration requires BAMBOOHR_API_KEY, BAMBOOHR_COMPANY_DOMAIN, and
+BAMBOOHR_EMPLOYEE_ID to be set in your shell environment.

@@ -6,7 +6,8 @@
 #   BAMBOOHR_COMPANY_DOMAIN   — Company subdomain
 #   BAMBOOHR_EMPLOYEE_ID      — Manager's employee ID
 #
-# Reads validation rules from ../config.json (project names, ticket patterns, mandatory tasks).
+# Reads validation rules from ../review-config.json (project names, ticket patterns, mandatory tasks).
+# Note: review-config.json is separate from config.json, which init.sh auto-generates.
 #
 # Usage:
 #   bash review.sh                    # Review previous week (Mon–Sun)
@@ -15,16 +16,16 @@
 set -euo pipefail
 
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CONFIG_FILE="${SKILL_DIR}/config.json"
+CONFIG_FILE="${SKILL_DIR}/review-config.json"
 
 # --- Validate config ---
 if [[ ! -f "$CONFIG_FILE" ]]; then
-  echo "Error: config.json not found at ${CONFIG_FILE}" >&2
-  echo "Run /timesheet-review to complete the first-time setup." >&2
+  echo "Error: review-config.json not found at ${CONFIG_FILE}" >&2
+  echo "Run /timesheet review to complete the first-time setup." >&2
   exit 1
 fi
 if ! jq empty "$CONFIG_FILE" 2>/dev/null; then
-  echo "Error: config.json is not valid JSON." >&2
+  echo "Error: review-config.json is not valid JSON." >&2
   exit 1
 fi
 
