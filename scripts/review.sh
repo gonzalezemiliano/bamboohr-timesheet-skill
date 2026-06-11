@@ -6,25 +6,32 @@
 #   BAMBOOHR_COMPANY_DOMAIN   — Company subdomain
 #   BAMBOOHR_EMPLOYEE_ID      — Manager's employee ID
 #
-# Reads validation rules from ../config.json (project names, ticket patterns, mandatory tasks).
+# Reads validation rules from ../review-config.json (project names, ticket patterns, mandatory tasks).
+# Note: review-config.json is separate from config.json, which init.sh auto-generates.
 #
 # Usage:
-#   bash review.sh                    # Review previous week (Mon–Sun)
-#   bash review.sh --week 2026-05-25  # Review specific week (provide Monday date)
+#   bash review.sh                                    # Review previous week (Mon–Sun)
+#   bash review.sh --week 2026-05-25                  # Review specific week (provide Monday date)
+#   bash review.sh --start 2026-06-01 --end 2026-06-10  # Review arbitrary date range
+#   bash review.sh --all                              # Review every employee, not just direct reports
+#   bash review.sh --employees "Ana López, Juan Pérez"  # Review specific employees by display name
+#
+# The hours target scales to the business days (Mon–Fri) in the range:
+# business days × (weeklyHoursTarget / 5). A Mon–Sun week keeps the full weekly target.
 
 set -euo pipefail
 
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CONFIG_FILE="${SKILL_DIR}/config.json"
+CONFIG_FILE="${SKILL_DIR}/review-config.json"
 
 # --- Validate config ---
 if [[ ! -f "$CONFIG_FILE" ]]; then
-  echo "Error: config.json not found at ${CONFIG_FILE}" >&2
-  echo "Run /timesheet-review to complete the first-time setup." >&2
+  echo "Error: review-config.json not found at ${CONFIG_FILE}" >&2
+  echo "Run /timesheet review to complete the first-time setup." >&2
   exit 1
 fi
 if ! jq empty "$CONFIG_FILE" 2>/dev/null; then
-  echo "Error: config.json is not valid JSON." >&2
+  echo "Error: review-config.json is not valid JSON." >&2
   exit 1
 fi
 
@@ -44,6 +51,8 @@ fi
 
 CONFIG=$(cat "$CONFIG_FILE")
 HOURS_TARGET=$(echo "$CONFIG" | jq '.weeklyHoursTarget // 40')
+# Daily hours assume a 5-day work week; also converts day-based time off to hours
+DAILY_HOURS=$(jq -n --argjson t "$HOURS_TARGET" '$t / 5')
 
 BASE_URL="https://${BAMBOOHR_COMPANY_DOMAIN}.bamboohr.com/api/v1"
 GATEWAY_URL="https://${BAMBOOHR_COMPANY_DOMAIN}.bamboohr.com/api/gateway.php/${BAMBOOHR_COMPANY_DOMAIN}/v1"
@@ -51,15 +60,49 @@ AUTH="${BAMBOOHR_API_KEY}:x"
 
 # --- Parse arguments ---
 WEEK_START=""
+RANGE_START=""
+RANGE_END=""
+ALL_EMPLOYEES="false"
+EMPLOYEE_NAMES=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --week) WEEK_START="$2"; shift 2 ;;
+    --week)      WEEK_START="$2"; shift 2 ;;
+    --start)     RANGE_START="$2"; shift 2 ;;
+    --end)       RANGE_END="$2"; shift 2 ;;
+    --all)       ALL_EMPLOYEES="true"; shift ;;
+    --employees) EMPLOYEE_NAMES="$2"; shift 2 ;;
     *) echo "Error: Unknown option: $1" >&2; exit 1 ;;
   esac
 done
 
-# --- Compute date range (Mon–Sun of target week) ---
-if [[ -z "$WEEK_START" ]]; then
+if [[ "$ALL_EMPLOYEES" == "true" && -n "$EMPLOYEE_NAMES" ]]; then
+  echo "Error: --all cannot be combined with --employees." >&2
+  exit 1
+fi
+
+# --- Compute date range ---
+if [[ -n "$RANGE_START" || -n "$RANGE_END" ]]; then
+  if [[ -n "$WEEK_START" ]]; then
+    echo "Error: --week cannot be combined with --start/--end." >&2
+    exit 1
+  fi
+  if [[ -z "$RANGE_START" || -z "$RANGE_END" ]]; then
+    echo "Error: --start and --end must be provided together." >&2
+    exit 1
+  fi
+  date_re='^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+  if [[ ! "$RANGE_START" =~ $date_re || ! "$RANGE_END" =~ $date_re ]]; then
+    echo "Error: Dates must use the YYYY-MM-DD format." >&2
+    exit 1
+  fi
+  if [[ "$RANGE_START" > "$RANGE_END" ]]; then
+    echo "Error: --start must not be after --end." >&2
+    exit 1
+  fi
+  WEEK_START="$RANGE_START"
+  WEEK_END="$RANGE_END"
+elif [[ -z "$WEEK_START" ]]; then
+  # Default: previous week (Mon–Sun)
   dow=$(date +%u)           # 1=Mon … 7=Sun
   prev_mon=$(( dow + 6 ))   # days back to previous Monday
   prev_sun=$(( dow ))       # days back to previous Sunday
@@ -69,6 +112,20 @@ else
   WEEK_END=$(date -j -v+6d -f "%Y-%m-%d" "$WEEK_START" "+%Y-%m-%d" 2>/dev/null \
           || date -d "$WEEK_START + 6 days" +%Y-%m-%d)
 fi
+
+# --- Compute hours target for the range (business days × daily hours) ---
+business_days=0
+d="$WEEK_START"
+while [[ ! "$d" > "$WEEK_END" ]]; do
+  d_dow=$(date -j -f "%Y-%m-%d" "$d" +%u 2>/dev/null || date -d "$d" +%u)
+  (( d_dow <= 5 )) && business_days=$(( business_days + 1 ))
+  d=$(date -j -v+1d -f "%Y-%m-%d" "$d" +%Y-%m-%d 2>/dev/null || date -d "$d + 1 day" +%Y-%m-%d)
+done
+if (( business_days == 0 )); then
+  echo "Error: No business days (Mon–Fri) in ${WEEK_START} to ${WEEK_END}." >&2
+  exit 1
+fi
+RANGE_TARGET=$(jq -n --argjson days "$business_days" --argjson daily "$DAILY_HOURS" '$days * $daily')
 
 # --- Fetch employee directory ---
 echo "Fetching employee directory..." >&2
@@ -92,17 +149,67 @@ if [[ -z "$manager_name" ]]; then
   exit 1
 fi
 
-# Collect direct reports (supervisor field matches manager's name)
-direct_reports=$(echo "$dir_body" | jq \
-  --arg mgr "$manager_name" \
-  '[.employees[] | select(.supervisor == $mgr) | {id: .id, name: .displayName, jobTitle: (.jobTitle // "")}]')
+if [[ -n "$EMPLOYEE_NAMES" ]]; then
+  # Review a specific list of employees, matched by display name.
+  # Exact match first (case-insensitive); falls back to substring match.
+  match_result=$(echo "$dir_body" | jq --arg names "$EMPLOYEE_NAMES" '
+    [.employees[] | {id: .id, name: .displayName, jobTitle: (.jobTitle // "")}] as $emps |
+    [$names | split(",")[] | gsub("^\\s+|\\s+$"; "") | select(length > 0)] |
+    map(. as $w |
+      ([$emps[] | select((.name | ascii_downcase) == ($w | ascii_downcase))]) as $exact |
+      (if ($exact | length) > 0 then $exact
+       else [$emps[] | select(.name | ascii_downcase | contains($w | ascii_downcase))]
+       end) as $m |
+      {query: $w, matches: $m}
+    )
+  ')
+
+  unmatched=$(echo "$match_result" | jq -r \
+    '[.[] | select(.matches | length == 0) | .query] | join(", ")')
+  if [[ -n "$unmatched" ]]; then
+    echo "Error: No directory match for: ${unmatched}" >&2
+    echo "Use the name as it appears in BambooHR (first and last name)." >&2
+    exit 1
+  fi
+
+  ambiguous=$(echo "$match_result" | jq -r \
+    '[.[] | select(.matches | length > 1) | "\(.query) → \([.matches[].name] | join(" / "))"] | join("; ")')
+  if [[ -n "$ambiguous" ]]; then
+    echo "Error: Ambiguous name(s): ${ambiguous}" >&2
+    echo "Use the full display name to disambiguate." >&2
+    exit 1
+  fi
+
+  direct_reports=$(echo "$match_result" | jq '[.[].matches[0]] | unique_by(.id)')
+elif [[ "$ALL_EMPLOYEES" == "true" ]]; then
+  # Review every employee in the directory except the requester
+  direct_reports=$(echo "$dir_body" | jq \
+    --argjson mid "$BAMBOOHR_EMPLOYEE_ID" \
+    '[.employees[] | select(.id != ($mid | tostring)) | {id: .id, name: .displayName, jobTitle: (.jobTitle // "")}]')
+else
+  # Collect direct reports (supervisor field matches manager's name)
+  direct_reports=$(echo "$dir_body" | jq \
+    --arg mgr "$manager_name" \
+    '[.employees[] | select(.supervisor == $mgr) | {id: .id, name: .displayName, jobTitle: (.jobTitle // "")}]')
+fi
 
 report_count=$(echo "$direct_reports" | jq 'length')
 if [[ "$report_count" == "0" ]]; then
-  echo "No direct reports found for ${manager_name}." >&2
+  if [[ "$ALL_EMPLOYEES" == "true" ]]; then
+    echo "No employees found in the directory." >&2
+  else
+    echo "No direct reports found for ${manager_name}." >&2
+    echo "If you manage managers (no direct reports of your own), rerun with --all to review every employee." >&2
+  fi
   exit 0
 fi
-echo "Found ${report_count} direct report(s) for ${manager_name}." >&2
+if [[ -n "$EMPLOYEE_NAMES" ]]; then
+  echo "Reviewing ${report_count} selected employee(s)." >&2
+elif [[ "$ALL_EMPLOYEES" == "true" ]]; then
+  echo "Reviewing all ${report_count} employee(s) in the company directory." >&2
+else
+  echo "Found ${report_count} direct report(s) for ${manager_name}." >&2
+fi
 
 # --- Fetch timesheet entries for all direct reports ---
 emp_ids=$(echo "$direct_reports" | jq -r '[.[].id] | join(",")')
@@ -119,44 +226,50 @@ if [[ "$ts_code" != "200" ]]; then
   exit 1
 fi
 
-# --- Fetch approved time off for each direct report ---
+# --- Fetch approved time off for all direct reports (single request) ---
 echo "Fetching time off data..." >&2
+# Day-based time off converts to hours assuming a 5-day work week
+DAILY_HOURS=$(jq -n --argjson t "$HOURS_TARGET" '$t / 5')
 timeoff_json="{}"
-while IFS= read -r emp_id; do
-  to_resp=$(curl -s -w "\n%{http_code}" -u "$AUTH" -H "Accept: application/json" \
-    "${BASE_URL}/time_off/requests?employeeId=${emp_id}&start=${WEEK_START}&end=${WEEK_END}&status=approved")
-  to_code=$(echo "$to_resp" | tail -1)
-  to_body=$(echo "$to_resp" | sed '$d')
+to_resp=$(curl -s -w "\n%{http_code}" -u "$AUTH" -H "Accept: application/json" \
+  "${BASE_URL}/time_off/requests?start=${WEEK_START}&end=${WEEK_END}&status=approved")
+to_code=$(echo "$to_resp" | tail -1)
+to_body=$(echo "$to_resp" | sed '$d')
 
-  if [[ "$to_code" == "200" ]]; then
-    emp_timeoff=$(echo "$to_body" | jq --arg start "$WEEK_START" --arg end "$WEEK_END" '
-      if type == "array" then . else [] end |
-      [
-        .[] |
-        select(
-          (.status | if type == "object" then .status else . end) == "approved"
-        ) |
-        (.amount.unit // "days") as $unit |
-        (if $unit == "hours" then 1 else 8 end) as $mult |
-        [
+if [[ "$to_code" == "200" ]]; then
+  timeoff_json=$(echo "$to_body" | jq \
+    --arg start "$WEEK_START" --arg end "$WEEK_END" \
+    --argjson daily "$DAILY_HOURS" \
+    --argjson reports "$direct_reports" '
+    [$reports[].id | tostring] as $ids |
+    (if type == "array" then . else [] end) |
+    map(
+      select((.employeeId | tostring) as $eid | $ids | index($eid)) |
+      select(
+        (.status | if type == "object" then .status else . end) == "approved"
+      ) |
+      (.amount.unit // "days") as $unit |
+      (if $unit == "hours" then 1 else $daily end) as $mult |
+      {
+        id: (.employeeId | tostring),
+        hours: ([
           .dates | to_entries[] |
           select(.key >= $start and .key <= $end) |
           (.value | tonumber) * $mult
-        ] | add // 0
-      ] | add // 0
-    ')
-    timeoff_json=$(echo "$timeoff_json" | jq \
-      --arg id "$emp_id" \
-      --argjson hours "${emp_timeoff:-0}" \
-      '. + {($id): $hours}')
-  fi
-done < <(echo "$direct_reports" | jq -r '.[].id')
+        ] | add // 0)
+      }
+    ) |
+    group_by(.id) | map({key: .[0].id, value: (map(.hours) | add)}) | from_entries
+  ')
+else
+  echo "Warning: Time off API returned HTTP ${to_code} — assuming no time off." >&2
+fi
 
 # --- Validate entries and build report data ---
 REPORT=$(echo "$ts_body" | jq \
   --argjson reports "$direct_reports" \
   --argjson config "$CONFIG" \
-  --argjson target "$HOURS_TARGET" \
+  --argjson target "$RANGE_TARGET" \
   --argjson timeoff "$timeoff_json" \
   '
   . as $entries |
@@ -199,7 +312,9 @@ REPORT=$(echo "$ts_body" | jq \
 
 # --- Print report ---
 echo ""
-echo "# Weekly Timesheet Review — ${WEEK_START} to ${WEEK_END}"
+echo "# Timesheet Review — ${WEEK_START} to ${WEEK_END}"
+echo ""
+echo "Target: ${RANGE_TARGET}h (${business_days} business days × ${DAILY_HOURS}h/day, before time off)"
 echo ""
 echo "## Summary"
 echo ""
