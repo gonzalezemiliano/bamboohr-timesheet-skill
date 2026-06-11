@@ -50,6 +50,7 @@ To refresh the project/task list: `bash .claude/skills/timesheet/scripts/init.sh
 | `review --week 2026-05-25` | Team review for a specific week (Monday date) |
 | `review --start 2026-06-01 --end 2026-06-10` | Team review for an arbitrary date range |
 | `review --all` | Team review of every employee in the company (senior managers without direct reports) |
+| `review --employees "Ana López, Juan Pérez"` | Team review of specific employees by name |
 | No argument | Start the conversational flow from Step 1 |
 | Natural language (e.g., "4h feature dev") | Treat as `add <text>` |
 
@@ -225,7 +226,7 @@ When the user says "review", "--review", "review del equipo", "check team hours"
 
 The review covers the previous week by default, a specific week (`--week`), or an arbitrary date range (`--start`/`--end`). The hours target scales to the business days (Mon–Fri) in the range: `business days × weeklyHoursTarget / 5`.
 
-**Scope:** by default only the manager's direct reports are reviewed. If the user is a senior manager with no direct reports (they manage managers), or explicitly asks to review the whole company, add `--all` to review every employee in the directory. If the script reports "No direct reports found", offer the user the `--all` option before rerunning.
+**Scope:** by default only the manager's direct reports are reviewed. If the user is a senior manager with no direct reports (they manage managers), or explicitly asks to review the whole company, add `--all` to review every employee in the directory. If the user names specific people ("revisá las horas de Ana y Juan"), pass them as `--employees "Ana López, Juan Pérez"` — comma-separated display names as they appear in BambooHR (first and last name; case-insensitive, partial names work if unambiguous). If the script reports "No direct reports found", offer the user the `--all` option before rerunning. If it reports unmatched or ambiguous names, show the script's message and ask the user for the corrected names.
 
 Validation rules live in `review-config.json` — separate from `config.json`, which init.sh auto-generates and overwrites on `--refresh`.
 
@@ -278,6 +279,11 @@ For **all employees in the company** (combinable with any date option):
 bash .claude/skills/timesheet/scripts/review.sh --all --start 2026-06-01 --end 2026-06-10
 ```
 
+For **specific employees by name** (combinable with any date option):
+```bash
+bash .claude/skills/timesheet/scripts/review.sh --employees "Ana López, Juan Pérez" --week 2026-05-25
+```
+
 The script prints a markdown report to stdout: the hours target for the range, a summary table (worked hours, time off, effective target, status per employee), and a per-employee entry detail. Display the output directly to the user — no additional formatting needed.
 
 ### Review Errors
@@ -286,6 +292,7 @@ The script prints a markdown report to stdout: the hours target for the range, a
 |-------|--------|
 | `review-config.json` missing | Run the Review Setup flow |
 | No direct reports found | Offer to rerun with `--all` (reviews every employee) — confirm with the user first |
+| Unmatched or ambiguous `--employees` name | Show the script's message and ask the user for the corrected full name |
 | Invalid date range (`--start` after `--end`, bad format, no business days) | Show the script's error and ask for corrected dates |
 | API error | Show HTTP status and response body |
 

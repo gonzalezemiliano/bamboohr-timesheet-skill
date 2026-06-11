@@ -340,6 +340,9 @@ bash scripts/review.sh --start 2026-06-01 --end 2026-06-10
 
 # Senior managers without direct reports: review every employee in the company
 bash scripts/review.sh --all
+
+# Review specific employees by name (as shown in BambooHR)
+bash scripts/review.sh --employees "Ana López, Juan Pérez"
 ```
 
 ## API Reference

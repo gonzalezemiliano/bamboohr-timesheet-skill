@@ -14,6 +14,7 @@
 #   bash review.sh --week 2026-05-25                  # Review specific week (provide Monday date)
 #   bash review.sh --start 2026-06-01 --end 2026-06-10  # Review arbitrary date range
 #   bash review.sh --all                              # Review every employee, not just direct reports
+#   bash review.sh --employees "Ana López, Juan Pérez"  # Review specific employees by display name
 #
 # The hours target scales to the business days (Mon–Fri) in the range:
 # business days × (weeklyHoursTarget / 5). A Mon–Sun week keeps the full weekly target.
@@ -62,15 +63,22 @@ WEEK_START=""
 RANGE_START=""
 RANGE_END=""
 ALL_EMPLOYEES="false"
+EMPLOYEE_NAMES=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --week)  WEEK_START="$2"; shift 2 ;;
-    --start) RANGE_START="$2"; shift 2 ;;
-    --end)   RANGE_END="$2"; shift 2 ;;
-    --all)   ALL_EMPLOYEES="true"; shift ;;
+    --week)      WEEK_START="$2"; shift 2 ;;
+    --start)     RANGE_START="$2"; shift 2 ;;
+    --end)       RANGE_END="$2"; shift 2 ;;
+    --all)       ALL_EMPLOYEES="true"; shift ;;
+    --employees) EMPLOYEE_NAMES="$2"; shift 2 ;;
     *) echo "Error: Unknown option: $1" >&2; exit 1 ;;
   esac
 done
+
+if [[ "$ALL_EMPLOYEES" == "true" && -n "$EMPLOYEE_NAMES" ]]; then
+  echo "Error: --all cannot be combined with --employees." >&2
+  exit 1
+fi
 
 # --- Compute date range ---
 if [[ -n "$RANGE_START" || -n "$RANGE_END" ]]; then
@@ -141,7 +149,39 @@ if [[ -z "$manager_name" ]]; then
   exit 1
 fi
 
-if [[ "$ALL_EMPLOYEES" == "true" ]]; then
+if [[ -n "$EMPLOYEE_NAMES" ]]; then
+  # Review a specific list of employees, matched by display name.
+  # Exact match first (case-insensitive); falls back to substring match.
+  match_result=$(echo "$dir_body" | jq --arg names "$EMPLOYEE_NAMES" '
+    [.employees[] | {id: .id, name: .displayName, jobTitle: (.jobTitle // "")}] as $emps |
+    [$names | split(",")[] | gsub("^\\s+|\\s+$"; "") | select(length > 0)] |
+    map(. as $w |
+      ([$emps[] | select((.name | ascii_downcase) == ($w | ascii_downcase))]) as $exact |
+      (if ($exact | length) > 0 then $exact
+       else [$emps[] | select(.name | ascii_downcase | contains($w | ascii_downcase))]
+       end) as $m |
+      {query: $w, matches: $m}
+    )
+  ')
+
+  unmatched=$(echo "$match_result" | jq -r \
+    '[.[] | select(.matches | length == 0) | .query] | join(", ")')
+  if [[ -n "$unmatched" ]]; then
+    echo "Error: No directory match for: ${unmatched}" >&2
+    echo "Use the name as it appears in BambooHR (first and last name)." >&2
+    exit 1
+  fi
+
+  ambiguous=$(echo "$match_result" | jq -r \
+    '[.[] | select(.matches | length > 1) | "\(.query) → \([.matches[].name] | join(" / "))"] | join("; ")')
+  if [[ -n "$ambiguous" ]]; then
+    echo "Error: Ambiguous name(s): ${ambiguous}" >&2
+    echo "Use the full display name to disambiguate." >&2
+    exit 1
+  fi
+
+  direct_reports=$(echo "$match_result" | jq '[.[].matches[0]] | unique_by(.id)')
+elif [[ "$ALL_EMPLOYEES" == "true" ]]; then
   # Review every employee in the directory except the requester
   direct_reports=$(echo "$dir_body" | jq \
     --argjson mid "$BAMBOOHR_EMPLOYEE_ID" \
@@ -163,7 +203,9 @@ if [[ "$report_count" == "0" ]]; then
   fi
   exit 0
 fi
-if [[ "$ALL_EMPLOYEES" == "true" ]]; then
+if [[ -n "$EMPLOYEE_NAMES" ]]; then
+  echo "Reviewing ${report_count} selected employee(s)." >&2
+elif [[ "$ALL_EMPLOYEES" == "true" ]]; then
   echo "Reviewing all ${report_count} employee(s) in the company directory." >&2
 else
   echo "Found ${report_count} direct report(s) for ${manager_name}." >&2
