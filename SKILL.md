@@ -80,7 +80,7 @@ Do NOT run `init.sh` (it needs an API key). Instead:
 
 Ask the user what they worked on today (unless text was provided as an argument). Accept natural language descriptions like:
 
-- "I spent 4 hours on PTA-2300 feature dev, 2 hours reviewing PRs, and had a 30 min DSU"
+- "I spent 4 hours on JIRA-1234 feature dev, 2 hours reviewing PRs, and had a 30 min DSU"
 - "Mostly code reviews today, about 3 hours. Rest was meetings."
 - "Feature development all day, 8 hours"
 
@@ -103,7 +103,7 @@ For each candidate entry, match it to a project and task from `config.json`. Use
 
 If there's ambiguity, ask the user using AskUserQuestion.
 
-When the same task name exists under multiple projects (e.g. "Project Meetings - Internal"), use the project that matches the work context. For client work, use the client's project. For internal Modelit activities, use the relevant Modelit project.
+When the same task name exists under multiple projects (e.g. "Project Meetings - Internal"), use the project that matches the work context. For client work, use the client's project. For internal company activities, use the relevant internal project.
 
 Use today's date unless the user specifies otherwise.
 
@@ -114,9 +114,9 @@ Display a markdown table of all entries:
 ```
 | # | Date       | Project              | Task                        | Hours | Note                    |
 |---|------------|----------------------|-----------------------------|-------|-------------------------|
-| 1 | 2026-02-13 | PeerNova - Cuneiform | Feature Development         | 4.0   | PTA-2300 implementation |
-| 2 | 2026-02-13 | PeerNova - Cuneiform | Code Review                 | 2.0   | PR reviews              |
-| 3 | 2026-02-13 | PeerNova - Cuneiform | Project Meetings - Internal | 0.5   | DSU                     |
+| 1 | 2026-02-13 | Acme Corp - Platform | Feature Development         | 4.0   | JIRA-1234 implementation |
+| 2 | 2026-02-13 | Acme Corp - Platform | Code Review                 | 2.0   | PR reviews              |
+| 3 | 2026-02-13 | Acme Corp - Platform | Project Meetings - Internal | 0.5   | DSU                     |
 
 Total: 6.5 hours
 ```
@@ -148,8 +148,8 @@ If the user says "cancel", "start over", or "clear all", discard all entries and
 ```json
 {
   "hours": [
-    {"employeeId": 121, "date": "2026-02-13", "hours": 4.0, "projectId": 15, "taskId": 121, "note": "PTA-2300 implementation"},
-    {"employeeId": 121, "date": "2026-02-13", "hours": 2.0, "projectId": 15, "taskId": 119, "note": "PR reviews"}
+    {"employeeId": 123, "date": "2026-02-13", "hours": 4.0, "projectId": 10, "taskId": 20, "note": "JIRA-1234 implementation"},
+    {"employeeId": 123, "date": "2026-02-13", "hours": 2.0, "projectId": 10, "taskId": 21, "note": "PR reviews"}
   ]
 }
 ```
@@ -169,9 +169,9 @@ Copy these into BambooHR → Time Tracking (manual entry):
 
 | Date       | Project              | Task                        | Hours | Note                    |
 |------------|----------------------|-----------------------------|-------|-------------------------|
-| 2026-02-13 | PeerNova - Cuneiform | Feature Development         | 4.0   | PTA-2300 implementation |
-| 2026-02-13 | PeerNova - Cuneiform | Code Review                 | 2.0   | PR reviews              |
-| 2026-02-13 | PeerNova - Cuneiform | Project Meetings - Internal | 0.5   | DSU                     |
+| 2026-02-13 | Acme Corp - Platform | Feature Development         | 4.0   | JIRA-1234 implementation |
+| 2026-02-13 | Acme Corp - Platform | Code Review                 | 2.0   | PR reviews              |
+| 2026-02-13 | Acme Corp - Platform | Project Meetings - Internal | 0.5   | DSU                     |
 
 Total: 6.5 hours
 ```
@@ -236,7 +236,7 @@ When the user says "calendar", "cal", or uses the `calendar` argument, fetch eve
    | "DSU", "standup", "daily", "scrum" | Project Meetings - Internal |
    | "1:1", "one on one", "check-in" | Project Meetings - Internal |
    | "sprint", "planning", "grooming", "refinement", "retro" | Project Meetings - Internal |
-   | "interview" | Interview (Modelit - General) |
+   | "interview" | Interview (Internal - General) |
    | "review", "PR" | Code Review |
    | "demo", "showcase" | Project Meetings - Client |
    | "leadership", "management", "directors" | Leadership Activities |
@@ -263,11 +263,11 @@ Found 5 events:
 
 | # | Date       | Project              | Task                        | Hours | Note (from calendar)         |
 |---|------------|----------------------|-----------------------------|-------|------------------------------|
-| 1 | 2026-02-13 | PeerNova - Cuneiform | Project Meetings - Internal | 0.5   | DSU                          |
-| 2 | 2026-02-13 | PeerNova - Cuneiform | Project Meetings - Internal | 0.5   | PO Check                     |
-| 3 | 2026-02-13 | PeerNova - Cuneiform | Troubleshooting Meeting     | 1.0   | ISV-6071 Troubleshooting     |
-| 4 | 2026-02-13 | Modelit - General    | Interview                   | 1.0   | Technical Interview - Lucas  |
-| 5 | 2026-02-13 | Modelit - General    | Interview                   | 1.0   | Technical Interview - Maxi   |
+| 1 | 2026-02-13 | Acme Corp - Platform | Project Meetings - Internal | 0.5   | DSU                          |
+| 2 | 2026-02-13 | Acme Corp - Platform | Project Meetings - Internal | 0.5   | PO Check                     |
+| 3 | 2026-02-13 | Acme Corp - Platform | Troubleshooting Meeting     | 1.0   | JIRA-2087 Troubleshooting    |
+| 4 | 2026-02-13 | Internal - General   | Interview                   | 1.0   | Interview - Candidate A      |
+| 5 | 2026-02-13 | Internal - General   | Interview                   | 1.0   | Interview - Candidate B      |
 
 Calendar total: 4.0 hours
 
@@ -303,7 +303,7 @@ For a specific date range:
 When the user says "review", "--review", "review del equipo", "check team hours", or similar, run the team timesheet review. It fetches the manager's direct reports from the BambooHR directory and validates that each person:
 
 1. Logged the required hours for the period (approved time off is subtracted from the target)
-2. Included a ticket ID (e.g., `TD-11615`) in the description of technical entries
+2. Included a ticket ID (e.g., `PROJ-1234`) in the description of technical entries
 
 The review covers the previous week by default, a specific week (`--week`), or an arbitrary date range (`--start`/`--end`). The hours target scales to the business days (Mon–Fri) in the range: `business days × weeklyHoursTarget / 5`.
 
@@ -319,7 +319,7 @@ Check if `review-config.json` exists in the skill directory. If it does NOT exis
    - How many hours per week should each person log? (default: 40)
    - Which project(s) does their team work on?
 2. For each project, ask:
-   - What is the ticket ID pattern? (e.g., `TD-[0-9]+`, `JIRA-[0-9]+`, `PTA-[0-9]+`)
+   - What is the ticket ID pattern? (e.g., `PROJ-[0-9]+`, `JIRA-[0-9]+`, `ABC-[0-9]+`)
    - Which task types require a ticket ID in the description? (let the user select from their BambooHR tasks or type them)
 3. Write `review-config.json` using this structure:
 ```json
@@ -328,7 +328,7 @@ Check if `review-config.json` exists in the skill directory. If it does NOT exis
   "projects": [
     {
       "name": "Project Name",
-      "ticketPattern": "TD-[0-9]+",
+      "ticketPattern": "PROJ-[0-9]+",
       "mandatoryTasks": ["Bug Fixing", "Feature Development", "QA Testing"]
     }
   ]

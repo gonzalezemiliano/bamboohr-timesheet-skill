@@ -59,7 +59,7 @@ source ~/.zshrc
 Your employee ID is the number in the URL when you view your BambooHR profile:
 
 ```
-https://your-company.bamboohr.com/employees/121/...
+https://your-company.bamboohr.com/employees/123/...
                                               ^^^
                                               This is your employee ID
 ```
@@ -72,7 +72,7 @@ Add the following to your shell profile (`~/.zshrc` for macOS, `~/.bashrc` for L
 # BambooHR Timesheet Skill
 export BAMBOOHR_API_KEY="your-api-key-here"
 export BAMBOOHR_COMPANY_DOMAIN="your-company"       # just the subdomain, not the full URL
-export BAMBOOHR_EMPLOYEE_ID="121"                    # your numeric employee ID
+export BAMBOOHR_EMPLOYEE_ID="123"                    # your numeric employee ID
 ```
 
 Then reload your shell:
@@ -104,16 +104,16 @@ From your workspace root, run `init.sh` to auto-discover your available projects
 This queries the BambooHR API and writes `config.json` with your projects and tasks. Example output:
 
 ```
-Fetching projects and tasks for employee 121...
+Fetching projects and tasks for employee 123...
 
 config.json written to: .claude/skills/timesheet/config.json
-  Employee ID: 121
+  Employee ID: 123
   Projects:    6
   Tasks:       68
 
 Available projects:
-  - Project X (23 tasks)
-  - Modelit - General (10 tasks)
+  - Acme Corp - Platform (23 tasks)
+  - Internal - General (10 tasks)
   ...
 ```
 
@@ -292,12 +292,12 @@ The scripts work without any AI agent at all:
 {
   "hours": [
     {
-      "employeeId": 121,
+      "employeeId": 123,
       "date": "2026-02-13",
       "hours": 4.0,
-      "projectId": 15,
-      "taskId": 121,
-      "note": "PTA-2300 feature development"
+      "projectId": 10,
+      "taskId": 20,
+      "note": "JIRA-1234 feature development"
     }
   ]
 }
@@ -368,7 +368,7 @@ Agent: (submits a single 1.0h entry)
 If you have direct reports in BambooHR, `/timesheet review` validates their timesheets:
 
 - Each person logged the required hours for the period (approved time off is subtracted from the target)
-- Technical entries include a ticket ID (e.g., `TD-11615`) in the description
+- Technical entries include a ticket ID (e.g., `PROJ-1234`) in the description
 
 The hours target scales to the business days in the reviewed range (`business days × weeklyHoursTarget / 5`), so a full week checks against the weekly target and a 3-day range against 3 days' worth.
 
